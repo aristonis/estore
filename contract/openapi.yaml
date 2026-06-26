@@ -1,0 +1,607 @@
+openapi: 3.1.0
+info:
+  title: estore API
+  version: 1.0.0
+  description: >
+    Root-owned, language-agnostic contract for the estore backend (D2). Every backend
+    implementation (Laravel now; Spring Boot, .NET later) MUST conform to this contract;
+    the Nuxt frontend targets it, not any single implementation. Errors use RFC 9457
+    Problem Details extended with `code` (numeric) + `code_name` (module.ErrorName) — D17/D18.
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local (Docker)
+tags:
+  - name: Auth
+  - name: Catalog
+  - name: Cart
+  - name: Orders
+  - name: Admin
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------- Auth (Identity) ----------------
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a customer account
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RegisterInput' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResult' } } } }
+        '409': { $ref: '#/components/responses/Problem' }   # identity.IdentifierInUse
+        '422': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in; issues a bearer token (api channel)
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoginInput' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResult' } } } }
+        '401': { $ref: '#/components/responses/Problem' }   # identity.InvalidCredentials (generic)
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current token
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current account (identify)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Account' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset (generic response, no enumeration)
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ForgotPasswordInput' } } }
+      responses:
+        '202': { description: Accepted (generic — never reveals account existence) }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password with a single-use token
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ResetPasswordInput' } } }
+      responses:
+        '204': { description: No Content }
+        '400': { $ref: '#/components/responses/Problem' }   # identity.InvalidResetToken (generic)
+        '422': { $ref: '#/components/responses/Problem' }
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change password (re-verifies current password)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ChangePasswordInput' } } }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  # ---------------- Catalog (public) ----------------
+  /products:
+    get:
+      tags: [Catalog]
+      summary: List published products
+      security: []
+      parameters:
+        - { name: category, in: query, schema: { type: string }, description: category slug }
+        - { name: price_min, in: query, schema: { type: number } }
+        - { name: price_max, in: query, schema: { type: number } }
+        - { name: sort, in: query, schema: { type: string, enum: [price, -price, newest] } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProductPage' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /products/{publicId}:
+    get:
+      tags: [Catalog]
+      summary: Product detail
+      security: []
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
+        '404': { $ref: '#/components/responses/Problem' }   # catalog.ProductNotFound
+  /categories:
+    get:
+      tags: [Catalog]
+      summary: List categories
+      security: []
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Category' } } } } }
+
+  # ---------------- Cart ----------------
+  /cart:
+    get:
+      tags: [Cart]
+      summary: View cart (guest via X-Cart-Token, customer via bearer)
+      security: []
+      parameters: [ { $ref: '#/components/parameters/CartToken' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+  /cart/items:
+    post:
+      tags: [Cart]
+      summary: Add an item to the cart
+      security: []
+      parameters: [ { $ref: '#/components/parameters/CartToken' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AddCartItemInput' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+        '404': { $ref: '#/components/responses/Problem' }   # catalog.ProductNotFound
+        '409': { $ref: '#/components/responses/Problem' }   # inventory.InsufficientStock
+        '422': { $ref: '#/components/responses/Problem' }
+  /cart/items/{productId}:
+    patch:
+      tags: [Cart]
+      summary: Update a cart line quantity
+      security: []
+      parameters: [ { $ref: '#/components/parameters/CartToken' }, { $ref: '#/components/parameters/ProductId' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateCartItemInput' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Cart]
+      summary: Remove a cart line
+      security: []
+      parameters: [ { $ref: '#/components/parameters/CartToken' }, { $ref: '#/components/parameters/ProductId' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+
+  # ---------------- Orders (customer) ----------------
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List my orders
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OrderPage' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Orders]
+      summary: Place an order from my cart (atomic)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PlaceOrderInput' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }   # inventory.InsufficientStock | ordering.CartEmpty
+        '422': { $ref: '#/components/responses/Problem' }
+  /orders/{orderNumber}:
+    get:
+      tags: [Orders]
+      summary: Get one of my orders (own only — 404 otherwise)
+      parameters: [ { $ref: '#/components/parameters/OrderNumber' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '404': { $ref: '#/components/responses/Problem' }   # ordering.OrderNotFound
+
+  # ---------------- Admin (RBAC: admin) ----------------
+  /admin/products:
+    get:
+      tags: [Admin]
+      summary: List all products (incl. unpublished)
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProductPage' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Admin]
+      summary: Create a product
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProductInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /admin/products/{publicId}:
+    patch:
+      tags: [Admin]
+      summary: Update a product
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProductInput' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Admin]
+      summary: Delete a product
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      responses:
+        '204': { description: No Content }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /admin/products/{publicId}/stock:
+    patch:
+      tags: [Admin]
+      summary: Set stock quantity (Inventory)
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/StockInput' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /admin/products/{publicId}/images:
+    get:
+      tags: [Admin]
+      summary: List a product's images (admin — includes media ids for deletion)
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { type: object, required: [id, url], properties: { id: { type: string }, url: { type: string, format: uri } } } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Admin]
+      summary: Upload a product image (added 2026-06-25, D21)
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, format: binary }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Product' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /admin/products/{publicId}/images/{mediaId}:
+    delete:
+      tags: [Admin]
+      summary: Delete a product image (D25)
+      parameters:
+        - { $ref: '#/components/parameters/PublicId' }
+        - { name: mediaId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: No Content }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /admin/categories:
+    post:
+      tags: [Admin]
+      summary: Create a category
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CategoryInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Category' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /admin/categories/{publicId}:
+    patch:
+      tags: [Admin]
+      summary: Update a category
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CategoryInput' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Category' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Admin]
+      summary: Delete a category
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      responses:
+        '204': { description: No Content }
+        '404': { $ref: '#/components/responses/Problem' }
+  /admin/offers:
+    get:
+      tags: [Admin]
+      summary: List all offers
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Offer' } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Admin]
+      summary: Create an offer
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OfferInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Offer' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /admin/offers/{publicId}:
+    patch:
+      tags: [Admin]
+      summary: Update an offer
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OfferInput' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Offer' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Admin]
+      summary: Delete an offer
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      responses:
+        '204': { description: No Content }
+        '404': { $ref: '#/components/responses/Problem' }
+  /admin/orders:
+    get:
+      tags: [Admin]
+      summary: List all orders
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OrderPage' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/orders/{orderNumber}:
+    patch:
+      tags: [Admin]
+      summary: Transition order status (cancel restocks atomically)
+      parameters: [ { $ref: '#/components/parameters/OrderNumber' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OrderTransitionInput' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }   # ordering.IllegalTransition
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, description: Sanctum personal access token }
+  parameters:
+    PublicId: { name: publicId, in: path, required: true, schema: { type: string, format: uuid } }
+    ProductId: { name: productId, in: path, required: true, schema: { type: string, format: uuid } }
+    OrderNumber: { name: orderNumber, in: path, required: true, schema: { type: string } }
+    CartToken: { name: X-Cart-Token, in: header, required: false, schema: { type: string }, description: Guest cart token }
+  responses:
+    Problem:
+      description: Error (RFC 9457 Problem Details + code/code_name)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+  schemas:
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: string
+          description: Exact decimal as a string, never a float (example 19.99)
+        currency: { type: string, minLength: 3, maxLength: 3, example: USD }
+    ProblemDetails:
+      type: object
+      required: [type, title, status, code, code_name]
+      properties:
+        type: { type: string, format: uri, example: 'https://errors.estore.dev/inventory/InsufficientStock' }
+        title: { type: string, example: Insufficient stock }
+        status: { type: integer, example: 409 }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: integer, example: 1501 }
+        code_name: { type: string, example: inventory.InsufficientStock }
+        errors:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+          description: Optional field-level validation messages
+    RegisterInput:
+      type: object
+      required: [identifier, password]
+      properties:
+        name: { type: string }
+        identifier: { type: string, format: email }
+        password: { type: string, minLength: 8, format: password }
+    LoginInput:
+      type: object
+      required: [identifier, password]
+      properties:
+        identifier: { type: string }
+        password: { type: string, format: password }
+    ForgotPasswordInput:
+      type: object
+      required: [identifier]
+      properties: { identifier: { type: string } }
+    ResetPasswordInput:
+      type: object
+      required: [token, password]
+      properties:
+        token: { type: string }
+        password: { type: string, minLength: 8, format: password }
+    ChangePasswordInput:
+      type: object
+      required: [current_password, password]
+      properties:
+        current_password: { type: string, format: password }
+        password: { type: string, minLength: 8, format: password }
+    AuthResult:
+      type: object
+      required: [account, token]
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        token: { type: string, description: Bearer token (returned once) }
+    Account:
+      type: object
+      required: [id, identifier, roles]
+      properties:
+        id: { type: string, format: uuid, description: Opaque public id }
+        name: { type: string }
+        identifier: { type: string }
+        roles: { type: array, items: { type: string, enum: [customer, admin] } }
+    Category:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+    CategoryInput:
+      type: object
+      required: [name]
+      properties: { name: { type: string } }
+    OfferSummary:
+      type: object
+      required: [id, name, discount_type, value]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        discount_type: { type: string, enum: [percentage, fixed] }
+        value:
+          type: string
+          description: percent (e.g. 10) or fixed amount (e.g. 5.00)
+    Offer:
+      allOf:
+        - $ref: '#/components/schemas/OfferSummary'
+        - type: object
+          required: [starts_at, ends_at, active, product_ids]
+          properties:
+            starts_at: { type: string, format: date-time }
+            ends_at: { type: string, format: date-time }
+            active: { type: boolean }
+            product_ids: { type: array, items: { type: string, format: uuid } }
+    OfferInput:
+      type: object
+      required: [name, discount_type, value, starts_at, ends_at, product_ids]
+      properties:
+        name: { type: string }
+        discount_type: { type: string, enum: [percentage, fixed] }
+        value: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        active: { type: boolean, default: true }
+        product_ids: { type: array, items: { type: string, format: uuid } }
+    Product:
+      type: object
+      required: [id, slug, name, base_price, effective_price, currency, published, stock_status, categories]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        base_price: { $ref: '#/components/schemas/Money' }
+        effective_price: { $ref: '#/components/schemas/Money' }
+        currency: { type: string }
+        published: { type: boolean }
+        stock_status: { type: string, enum: [in_stock, out_of_stock] }
+        stock_quantity: { type: integer, description: present for admin views }
+        active_offer: { oneOf: [ { $ref: '#/components/schemas/OfferSummary' }, { type: 'null' } ] }
+        categories: { type: array, items: { $ref: '#/components/schemas/Category' } }
+        images: { type: array, items: { type: string, format: uri } }
+    ProductInput:
+      type: object
+      required: [name, base_price, currency]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        base_price: { type: string, description: exact decimal }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        published: { type: boolean, default: false }
+        category_ids: { type: array, items: { type: string, format: uuid } }
+        stock_quantity: { type: integer, minimum: 0, default: 0 }
+    StockInput:
+      type: object
+      required: [quantity]
+      properties: { quantity: { type: integer, minimum: 0 } }
+    AddCartItemInput:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+    UpdateCartItemInput:
+      type: object
+      required: [quantity]
+      properties: { quantity: { type: integer, minimum: 1 } }
+    CartItem:
+      type: object
+      required: [product_id, name, quantity, unit_price, line_total]
+      properties:
+        product_id: { type: string, format: uuid }
+        name: { type: string }
+        quantity: { type: integer }
+        unit_price: { $ref: '#/components/schemas/Money' }
+        line_total: { $ref: '#/components/schemas/Money' }
+    Cart:
+      type: object
+      required: [items, total]
+      properties:
+        cart_token: { type: string, description: present for guest carts }
+        items: { type: array, items: { $ref: '#/components/schemas/CartItem' } }
+        total: { $ref: '#/components/schemas/Money' }
+    Address:
+      type: object
+      required: [name, line1, city, country]
+      properties:
+        name: { type: string }
+        line1: { type: string }
+        line2: { type: string }
+        city: { type: string }
+        postal_code: { type: string }
+        country: { type: string, minLength: 2, maxLength: 2, description: ISO 3166-1 alpha-2 country code, example: US }
+        phone: { type: string }
+    PlaceOrderInput:
+      type: object
+      required: [address]
+      properties: { address: { $ref: '#/components/schemas/Address' } }
+    OrderItem:
+      type: object
+      required: [product_id, name, quantity, unit_price, line_total]
+      properties:
+        product_id: { type: string, format: uuid }
+        name: { type: string, description: snapshot at order time }
+        quantity: { type: integer }
+        unit_price: { $ref: '#/components/schemas/Money', description: snapshot }
+        line_total: { $ref: '#/components/schemas/Money' }
+    Order:
+      type: object
+      required: [order_number, status, payment_status, items, total, placed_at]
+      properties:
+        order_number: { type: string, description: opaque }
+        status: { type: string, enum: [placed, fulfilled, cancelled] }
+        payment_status: { type: string, enum: [pending] }
+        address: { $ref: '#/components/schemas/Address' }
+        items: { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
+        total: { $ref: '#/components/schemas/Money' }
+        placed_at: { type: string, format: date-time }
+    OrderSummary:
+      type: object
+      required: [order_number, status, total, placed_at]
+      properties:
+        order_number: { type: string }
+        status: { type: string, enum: [placed, fulfilled, cancelled] }
+        total: { $ref: '#/components/schemas/Money' }
+        placed_at: { type: string, format: date-time }
+    OrderTransitionInput:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [fulfilled, cancelled] } }
+    Page:
+      type: object
+      required: [page, per_page, total]
+      properties:
+        page: { type: integer }
+        per_page: { type: integer }
+        total: { type: integer }
+    ProductPage:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/Product' } } }
+    OrderPage:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/OrderSummary' } } }
