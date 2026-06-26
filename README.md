@@ -1,68 +1,67 @@
 # estore — Multi-Language E-Commerce Comparison Study
 
-The **umbrella repository** for a study that builds one e-commerce platform against **one
-frozen API contract**, then re-implements the **same backend** in several languages to compare
-them fairly. One frontend talks to any backend, unchanged.
+This is the umbrella repository for the estore project. The goal is straightforward: build one
+e-commerce platform against a fixed API definition, then rebuild the same backend in several
+languages and compare how each implementation works out. The frontend stays the same throughout
+and runs against whichever backend is up.
 
-This repo is the **single source of truth** for the cross-cutting artifacts — the API contract
-and the project docs. The application code lives in separate, per-language repositories
-(see [Repositories](#repositories)).
+The application code lives in separate repositories, listed under [Repositories](#repositories)
+below. What this repository holds is the material they all share: the API definition and the
+project documentation.
 
-## Why a shared contract
+## The shared contract
 
-Every backend conforms to the same root-owned **OpenAPI 3 contract** (`contract/openapi.yaml`)
-and **error catalog** (`contract/error-catalog.md`). Nothing is generated *from* a backend; the
-contract is hand-authored and authoritative (decisions D2 / D18).
+The whole project is organised around one OpenAPI definition (`contract/openapi.yaml`) and a
+companion list of error codes (`contract/error-catalog.md`). We write these by hand and treat
+them as the reference. They are never generated from a backend.
 
-- **Backends** are held to the contract by **contract tests** — e.g. the Laravel suite uses
-  [Spectator](https://github.com/hotmeteor/spectator) to assert every request/response matches
-  the schema, and per-module tests assert every thrown error code is documented in
-  `error-catalog.md`.
-- **The frontend** generates its TypeScript types from the contract
-  (`openapi-typescript` → `pnpm gen:api`), so the typed API client is compile-checked against it.
+Each part of the system checks itself against that definition:
 
-Change the contract → re-run the backend contract tests and `pnpm gen:api` on the frontend, and
-every drift surfaces immediately. This is what makes the language comparison fair: the contract,
-not any one implementation, is the fixed point.
+- The backends run contract tests. The Laravel backend uses
+  [Spectator](https://github.com/hotmeteor/spectator) to verify that every request and response
+  matches the schema, and a set of tests to verify that every error code it can throw is listed
+  in the error catalog.
+- The frontend generates its TypeScript types directly from the contract (`pnpm gen:api`), so
+  the API client will not compile if it drifts from the agreed shapes.
+
+When the contract changes, you re-run the backend tests and regenerate the frontend types, and
+any mismatch shows up straight away. This is what keeps the comparison honest: every
+implementation is measured against the same definition rather than against each other.
 
 ## Repositories
 
-The code is **polyrepo** — each implementation is its own repository. They are linked here and
-will be wired as git **submodules** once published.
+The code lives in these repositories:
 
-| Repo | Role | Stack | Status |
+| Repository | Role | Stack | Status |
 |---|---|---|---|
-| [`estore-laravel`](https://github.com/aristonis/estore-laravel) | Backend API | Laravel 13 modular monolith · PHP 8.4 · PostgreSQL | Feature-complete (140 tests) |
-| [`estore-nuxt`](https://github.com/aristonis/estore-nuxt) | Frontend | Nuxt 4 / Vue 3 SSR · Pinia · pnpm | Feature-complete |
-| `estore-springboot` | Backend (2nd impl) | Spring Boot · Java | Planned (B3) |
-| `estore-dotnet` | Backend (3rd impl) | .NET · C# | Planned (B4) |
-
-> The `estore-*` repos above are separate repositories (not yet pushed to remotes). Until they
-> are, they live beside this repo in the working tree and consume the contract by relative path
-> (`../estore/contract/openapi.yaml`).
+| [`estore-laravel`](https://github.com/aristonis/estore-laravel) | Backend API | Laravel 13 modular monolith, PHP 8.4, PostgreSQL | Feature-complete (140 tests) |
+| [`estore-nuxt`](https://github.com/aristonis/estore-nuxt) | Frontend | Nuxt 4 / Vue 3 SSR, Pinia, pnpm | Feature-complete |
+| `estore-springboot` | Second backend | Spring Boot, Java | Planned (B3) |
+| `estore-dotnet` | Third backend | .NET, C# | Planned (B4) |
 
 ## Layout
 
 ```
-estore/                     # this umbrella repo (aristonis/estore)
-├── contract/               # ⭐ Root-owned OpenAPI 3 contract — single source of truth (D2)
-│   ├── openapi.yaml        #    the API contract
-│   └── error-catalog.md    #    stable error codes (module.ErrorName), one 100-block per module (D18)
+estore/
+├── contract/
+│   ├── openapi.yaml        # the API definition
+│   └── error-catalog.md    # error codes (module.ErrorName), one 100-block per module
 ├── docs/
-│   ├── decision-log.md     #    every locked decision (D1…) with rationale
-│   ├── requirements/       #    spec.md (problem, FR/NFR, acceptance criteria)
-│   ├── architecture/       #    system design (8-module modular monolith)
-│   ├── stage-gates/        #    dev-workflow gate records
-│   ├── references.md       #    reference catalog
-│   └── work-log.md         #    chronological build log
+│   ├── decision-log.md     # the decisions taken, with reasoning
+│   ├── requirements/       # spec.md: problem, requirements, acceptance criteria
+│   ├── architecture/       # system design (eight-module modular monolith)
+│   ├── stage-gates/        # development-workflow gate records
+│   ├── references.md       # reference material
+│   └── work-log.md         # build log
 ├── LICENSE
 └── README.md
 ```
 
-## v1 scope
+## Scope (v1)
 
-Catalog · Cart · Checkout (no online payment) · Accounts/Auth · Admin/Inventory.
-Actors: Guest, Customer, Admin. Persistence: PostgreSQL.
+Catalog, cart, checkout (no online payment), accounts and authentication, and an admin area for
+catalog and inventory. Three roles: guest, customer, and admin. Data is stored in PostgreSQL.
 
-See [`docs/decision-log.md`](docs/decision-log.md) for the decisions behind this layout, and
-[`docs/requirements/spec.md`](docs/requirements/spec.md) for the full specification.
+For the reasoning behind the layout and the decisions, see
+[`docs/decision-log.md`](docs/decision-log.md). The full specification is in
+[`docs/requirements/spec.md`](docs/requirements/spec.md).
