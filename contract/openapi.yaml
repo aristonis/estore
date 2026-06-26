@@ -13,6 +13,8 @@ servers:
 tags:
   - name: Auth
   - name: Catalog
+  - name: Reviews
+  - name: Wishlist
   - name: Cart
   - name: Orders
   - name: Admin
@@ -128,6 +130,92 @@ paths:
       security: []
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Category' } } } } }
+
+  # ---------------- Reviews ----------------
+  /products/{publicId}/reviews:
+    get:
+      tags: [Reviews]
+      summary: List a product's published reviews (+ dual-rating summary)
+      security: []
+      parameters:
+        - { $ref: '#/components/parameters/PublicId' }
+        - { name: verified, in: query, schema: { type: boolean }, description: only verified-purchase reviews }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewPage' } } } }
+        '404': { $ref: '#/components/responses/Problem' }   # catalog.ProductNotFound
+    post:
+      tags: [Reviews]
+      summary: Write a review for a product (one per customer per product)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReviewInput' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Review' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }   # catalog.ProductNotFound
+        '409': { $ref: '#/components/responses/Problem' }   # reviews.AlreadyReviewed
+        '422': { $ref: '#/components/responses/Problem' }
+  /products/{publicId}/reviews/{reviewId}:
+    patch:
+      tags: [Reviews]
+      summary: Update my own review
+      parameters: [ { $ref: '#/components/parameters/PublicId' }, { $ref: '#/components/parameters/ReviewId' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReviewInput' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Review' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }   # reviews.ReviewNotFound (own-only => 404)
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Reviews]
+      summary: Delete my own review
+      parameters: [ { $ref: '#/components/parameters/PublicId' }, { $ref: '#/components/parameters/ReviewId' } ]
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }   # reviews.ReviewNotFound
+  /products/{publicId}/related:
+    get:
+      tags: [Catalog]
+      summary: Related products (share a category; excludes the product itself)
+      security: []
+      parameters: [ { $ref: '#/components/parameters/PublicId' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Product' } } } } }
+        '404': { $ref: '#/components/responses/Problem' }   # catalog.ProductNotFound
+
+  # ---------------- Wishlist (customer) ----------------
+  /wishlist:
+    get:
+      tags: [Wishlist]
+      summary: View my wishlist
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Wishlist' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /wishlist/items:
+    post:
+      tags: [Wishlist]
+      summary: Add a product to my wishlist (idempotent)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WishlistItemInput' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Wishlist' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }   # catalog.ProductNotFound
+        '422': { $ref: '#/components/responses/Problem' }
+  /wishlist/items/{productId}:
+    delete:
+      tags: [Wishlist]
+      summary: Remove a product from my wishlist (idempotent)
+      parameters: [ { $ref: '#/components/parameters/ProductId' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Wishlist' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
 
   # ---------------- Cart ----------------
   /cart:
@@ -357,6 +445,39 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }   # ordering.IllegalTransition
+  /admin/reviews:
+    get:
+      tags: [Reviews]
+      summary: List reviews for moderation (incl. hidden)
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [published, hidden] } }
+        - { name: product_id, in: query, schema: { type: string, format: uuid } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewPage' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/reviews/{reviewId}:
+    patch:
+      tags: [Reviews]
+      summary: Moderate a review (hide / unhide)
+      parameters: [ { $ref: '#/components/parameters/ReviewId' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReviewModerationInput' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Review' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [Reviews]
+      summary: Delete a review
+      parameters: [ { $ref: '#/components/parameters/ReviewId' } ]
+      responses:
+        '204': { description: No Content }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
 components:
   securitySchemes:
@@ -365,6 +486,7 @@ components:
     PublicId: { name: publicId, in: path, required: true, schema: { type: string, format: uuid } }
     ProductId: { name: productId, in: path, required: true, schema: { type: string, format: uuid } }
     OrderNumber: { name: orderNumber, in: path, required: true, schema: { type: string } }
+    ReviewId: { name: reviewId, in: path, required: true, schema: { type: string, format: uuid } }
     CartToken: { name: X-Cart-Token, in: header, required: false, schema: { type: string }, description: Guest cart token }
   responses:
     Problem:
@@ -483,7 +605,7 @@ components:
         product_ids: { type: array, items: { type: string, format: uuid } }
     Product:
       type: object
-      required: [id, slug, name, base_price, effective_price, currency, published, stock_status, categories]
+      required: [id, slug, name, base_price, effective_price, currency, published, stock_status, categories, review_count, verified_review_count]
       properties:
         id: { type: string, format: uuid }
         slug: { type: string }
@@ -498,6 +620,14 @@ components:
         active_offer: { oneOf: [ { $ref: '#/components/schemas/OfferSummary' }, { type: 'null' } ] }
         categories: { type: array, items: { $ref: '#/components/schemas/Category' } }
         images: { type: array, items: { type: string, format: uri } }
+        average_rating:
+          oneOf: [ { type: number }, { type: 'null' } ]
+          description: Mean of all published reviews, 1 decimal; null when review_count is 0.
+        review_count: { type: integer, description: Count of all published reviews. }
+        verified_average_rating:
+          oneOf: [ { type: number }, { type: 'null' } ]
+          description: Mean of published reviews by verified purchasers; null when verified_review_count is 0.
+        verified_review_count: { type: integer, description: Count of published verified-purchase reviews. }
     ProductInput:
       type: object
       required: [name, base_price, currency]
@@ -605,3 +735,54 @@ components:
         - type: object
           required: [data]
           properties: { data: { type: array, items: { $ref: '#/components/schemas/OrderSummary' } } }
+    Review:
+      type: object
+      required: [id, product_id, rating, author_name, is_verified_purchase, status, created_at]
+      properties:
+        id: { type: string, format: uuid, description: Opaque public id }
+        product_id: { type: string, format: uuid }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        title: { type: string }
+        body: { type: string }
+        author_name: { type: string, description: Reviewer display name (never the email) }
+        is_verified_purchase: { type: boolean }
+        status: { type: string, enum: [published, hidden] }
+        created_at: { type: string, format: date-time }
+    ReviewInput:
+      type: object
+      required: [rating]
+      properties:
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        title: { type: string, maxLength: 120 }
+        body: { type: string, maxLength: 2000 }
+    ReviewModerationInput:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [published, hidden] } }
+    RatingSummary:
+      type: object
+      required: [review_count, verified_review_count]
+      properties:
+        average_rating:
+          oneOf: [ { type: number }, { type: 'null' } ]
+        review_count: { type: integer }
+        verified_average_rating:
+          oneOf: [ { type: number }, { type: 'null' } ]
+        verified_review_count: { type: integer }
+    ReviewPage:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [data, summary]
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Review' } }
+            summary: { $ref: '#/components/schemas/RatingSummary' }
+    Wishlist:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Product' } }
+    WishlistItemInput:
+      type: object
+      required: [product_id]
+      properties: { product_id: { type: string, format: uuid } }

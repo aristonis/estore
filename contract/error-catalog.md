@@ -43,6 +43,10 @@ Every error the API can return. Each carries a stable numeric **`code`** and a *
 | 1700 | ordering.OrderNotFound | 404 | Unknown order, or not owned by the caller (scope-before-authorize). |
 | 1701 | ordering.CartEmpty | 409 | Checkout with an empty cart. |
 | 1702 | ordering.IllegalTransition | 409 | Status transition not allowed (e.g. fulfil a cancelled order). |
+| **reviews 1800–1899** | | | reviews & ratings |
+| 1800 | reviews.ReviewNotFound | 404 | Unknown review, or not owned by the caller (own-only edit/delete → 404). |
+| 1801 | reviews.AlreadyReviewed | 409 | A customer already reviewed this product (one per customer per product). |
+| **wishlist 1900–1999** | | | wishlist (reserved — none yet; add-of-unknown reuses catalog.ProductNotFound 1300) |
 
 **Implementation note:** each row is one subclass of `Core\Exception\DomainException` declaring
 `status()`, `code()`, `codeName()`; the central handler reads these to render Problem Details.
