@@ -49,10 +49,7 @@ estore/
 ├── docs/
 │   ├── decision-log.md     # the decisions taken, with reasoning
 │   ├── requirements/       # spec.md: problem, requirements, acceptance criteria
-│   ├── architecture/       # system design (eight-module modular monolith)
-│   ├── stage-gates/        # development-workflow gate records
-│   ├── references.md       # reference material
-│   └── work-log.md         # build log
+│   └── architecture/       # system design (eight-module modular monolith)
 ├── LICENSE
 └── README.md
 ```
